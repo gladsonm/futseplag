@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gerenciador de Chaveamento - Campeonato de Estilingue</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#f59e0b;--muted:#9ca3af;--glass: rgba(255,255,255,0.03)}
+    *{box-sizing:border-box;font-family:Inter,ui-sans-serif,system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
+    body{margin:0;background:linear-gradient(180deg,#071024 0%, #071a2a 100%);color:#e6eef8;padding:18px}
+    header{display:flex;gap:12px;align-items:center;margin-bottom:18px}
+    h1{font-size:20px;margin:0}
+    .container{display:grid;grid-template-columns:360px 1fr;gap:18px}
+    .card{background:var(--card);padding:14px;border-radius:10px;box-shadow:0 6px 18px rgba(2,6,23,0.6)}
+    label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+    input[type=text], input[type=number]{width:100%;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:transparent;color:inherit}
+    button{cursor:pointer;padding:8px 10px;border-radius:8px;border:0;background:var(--accent);color:#071724;font-weight:600}
+    .muted{color:var(--muted);font-size:13px}
+    .players-list{margin-top:8px;display:flex;flex-direction:column;gap:8px;max-height:260px;overflow:auto}
+    .player-row{display:flex;gap:8px;align-items:center;justify-content:space-between;background:var(--glass);padding:8px;border-radius:8px}
+    .small{font-size:12px}
+    .controls{display:flex;gap:8px;margin-top:10px}
+
+    /* bracket */
+    .bracket-wrap{padding:12px;overflow:auto}
+    .rounds{display:flex;gap:18px;align-items:flex-start}
+    .round{min-width:260px}
+    .round h3{margin:0 0 8px 0;font-size:14px}
+    .match{background:rgba(255,255,255,0.03);padding:10px;border-radius:10px;margin-bottom:10px;border:1px solid rgba(255,255,255,0.02)}
+    .match .players{display:flex;flex-direction:column;gap:6px}
+    .player{display:flex;align-items:center;justify-content:space-between;padding:6px;border-radius:8px}
+    .player .name{font-weight:600}
+    .match .meta{display:flex;gap:8px;align-items:center;margin-top:8px}
+    .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted);padding:6px 8px;border-radius:8px}
+    .shot-grid{display:flex;gap:6px;flex-wrap:wrap}
+    .shot{width:34px;height:34px;border-radius:6px;display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,0.04);cursor:pointer}
+    .shot.hit{background:rgba(34,197,94,0.15);border-color:rgba(34,197,94,0.6);color:#a6f5c0}
+    .shot.miss{background:rgba(239,68,68,0.08);border-color:rgba(239,68,68,0.6);color:#fca5a5}
+    .status{font-size:13px;color:var(--muted)}
+
+    footer{margin-top:12px;color:var(--muted);font-size:13px}
+
+    /* responsive */
+    @media (max-width:900px){.container{grid-template-columns:1fr} .round{min-width:220px}}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Gerenciador de Chaveamento — Campeonato de Estilingue</h1>
+    <div class="muted">Preencha os nomes, gere a chave e gerencie os confrontos. Tudo salvo no localStorage.</div>
+  </header>
+
+  <div class="container">
+    <div class="card">
+      <label>Nome do Campeonato</label>
+      <input id="tournamentName" placeholder="Ex: 1º Campeonato de Estilingue - 2025" />
+
+      <label style="margin-top:8px">Adicionar jogador</label>
+      <div style="display:flex;gap:8px">
+        <input id="playerName" type="text" placeholder="Nome do jogador" />
+        <button id="addPlayerBtn">Adicionar</button>
+      </div>
+      <div class="players-list" id="playersList"></div>
+
+      <div class="controls">
+        <button id="shuffleBtn" class="btn-ghost">Embaralhar</button>
+        <button id="generateBtn">Gerar chave</button>
+        <button id="clearBtn" class="btn-ghost">Limpar tudo</button>
+      </div>
+
+      <details style="margin-top:12px;color:var(--muted)">
+        <summary>Exportar / Importar</summary>
+        <div style="margin-top:8px">
+          <button id="exportBtn" class="btn-ghost">Exportar JSON</button>
+          <button id="importBtn" class="btn-ghost">Importar JSON</button>
+          <input id="importInput" type="file" accept="application/json" style="display:none" />
+        </div>
+      </details>
+
+      <div style="margin-top:12px" class="muted small">Dicas: se o número for ímpar, alguns jogadores terão BYE (avanço automático) na primeira fase.</div>
+
+      <footer>Dados salvos localmente no navegador. Use o botão "Exportar JSON" para backup.</footer>
+    </div>
+
+    <div class="card bracket-wrap">
+      <div id="bracketArea" class="bracket"></div>
+    </div>
+  </div>
+
+  <script>
+    // ======= Storage helpers ========
+    const LS_KEY = 'estilingue_tournament_v1';
+
+    function saveState(state){
+      localStorage.setItem(LS_KEY, JSON.stringify(state));
+    }
+    function loadState(){
+      try{ return JSON.parse(localStorage.getItem(LS_KEY)) || defaultState(); } catch(e){ return defaultState(); }
+    }
+    function defaultState(){
+      return {name:'', players:[], rounds:[]};
+    }
+
+    // ======= App state ========
+    let state = loadState();
+
+    // ======= DOM refs ========
+    const playersListEl = document.getElementById('playersList');
+    const playerNameInput = document.getElementById('playerName');
+    const addPlayerBtn = document.getElementById('addPlayerBtn');
+    const generateBtn = document.getElementById('generateBtn');
+    const bracketArea = document.getElementById('bracketArea');
+    const tournamentName = document.getElementById('tournamentName');
+    const clearBtn = document.getElementById('clearBtn');
+    const shuffleBtn = document.getElementById('shuffleBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const importBtn = document.getElementById('importBtn');
+    const importInput = document.getElementById('importInput');
+
+    // ======= Utilities ========
+    function uid(){ return Math.random().toString(36).slice(2,9); }
+    function deepClone(v){ return JSON.parse(JSON.stringify(v)); }
+
+    // ======= Players management ========
+    function renderPlayers(){
+      playersListEl.innerHTML='';
+      state.players.forEach((p, idx)=>{
+        const row = document.createElement('div'); row.className='player-row';
+        const left = document.createElement('div'); left.style.display='flex'; left.style.gap='8px'; left.style.alignItems='center';
+        left.innerHTML = `<div style="width:34px;height:34px;border-radius:6px;background:rgba(255,255,255,0.04);display:flex;align-items:center;justify-content:center;font-weight:700">${idx+1}</div><div><div style=\"font-weight:700\">${escapeHtml(p.name)}</div><div class=\"small muted\">${p.id}</div></div>`;
+        const actions = document.createElement('div'); actions.style.display='flex'; actions.style.gap='6px';
+        const up = document.createElement('button'); up.textContent='↑'; up.className='btn-ghost'; up.onclick = ()=>{ movePlayer(idx,-1); };
+        const down = document.createElement('button'); down.textContent='↓'; down.className='btn-ghost'; down.onclick = ()=>{ movePlayer(idx,1); };
+        const del = document.createElement('button'); del.textContent='Excluir'; del.className='btn-ghost'; del.onclick = ()=>{ if(confirm('Remover jogador?')){ state.players.splice(idx,1); persist(); renderPlayers(); } };
+        actions.appendChild(up); actions.appendChild(down); actions.appendChild(del);
+        row.appendChild(left); row.appendChild(actions);
+        playersListEl.appendChild(row);
+      })
+    }
+
+    function movePlayer(i, delta){
+      const j = i+delta; if(j<0||j>=state.players.length) return; const tmp = state.players[i]; state.players[i]=state.players[j]; state.players[j]=tmp; persist(); renderPlayers();
+    }
+
+    addPlayerBtn.onclick = ()=>{ const n = playerNameInput.value.trim(); if(!n) return alert('Digite o nome do jogador'); state.players.push({id:uid(), name:n}); playerNameInput.value=''; persist(); renderPlayers(); }
+    playerNameInput.addEventListener('keydown', e=>{ if(e.key==='Enter') addPlayerBtn.click(); })
+
+    tournamentName.addEventListener('input', ()=>{ state.name = tournamentName.value; persist(); })
+
+    shuffleBtn.onclick = ()=>{
+      for(let i=state.players.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [state.players[i],state.players[j]]=[state.players[j],state.players[i]] }
+      persist(); renderPlayers();
+    }
+
+    clearBtn.onclick = ()=>{ if(!confirm('Apagar tudo (jogadores e chaveamento)?')) return; state = defaultState(); persist(); renderPlayers(); renderBracket(); }
+
+    // ======= Bracket generation ========
+    function generateBracket(){
+      if(state.players.length<2){ alert('É necessário ao menos 2 jogadores para gerar a chave.'); return; }
+      // create initial matches (pair sequential)
+      const players = deepClone(state.players);
+      // if odd, add BYEs (null opponent)
+      const nextPow2 = Math.pow(2, Math.ceil(Math.log2(players.length))); // e.g., 5 -> 8
+      while(players.length < nextPow2) players.push(null);
+
+      const matches = [];
+      for(let i=0;i<players.length;i+=2){
+        const a = players[i]; const b = players[i+1];
+        matches.push(createMatch(a,b));
+      }
+
+      const rounds = [matches];
+      let current = matches.length;
+      while(current > 1){
+        const next = new Array(Math.floor(current/2)).fill(0).map(()=>createMatch(null,null, true));
+        rounds.push(next);
+        current = next.length;
+      }
+
+      state.rounds = rounds;
+      persist(); renderBracket();
+    }
+
+    function createMatch(a,b, placeholder=false){
+      // match state includes shots arrays for each player and winner id when decided
+      return {
+        id: uid(),
+        playerA: a ? {id:a.id, name:a.name} : null,
+        playerB: b ? {id:b.id, name:b.name} : null,
+        stage: 'main', // 'main' -> 5 shots, 'tb3' -> 3 shots, 'sudden' -> alternating
+        shotsA: [], shotsB: [], // booleans true=hit, false=miss
+        turn: 0, // used for sudden: 0 A starts then 1 B etc
+        winner: null,
+        placeholder: !!placeholder
+      }
+    }
+
+    // ======= Rendering bracket ========
+    function renderBracket(){
+      bracketArea.innerHTML='';
+      if(!state.rounds || state.rounds.length===0){ bracketArea.innerHTML='<div class="muted">Nenhuma chave gerada. Adicione jogadores e clique em "Gerar chave"</div>'; return; }
+      tournamentName.value = state.name || '';
+
+      const roundsEl = document.createElement('div'); roundsEl.className='rounds';
+      state.rounds.forEach((round, rIdx)=>{
+        const roundEl = document.createElement('div'); roundEl.className='round';
+        const title = document.createElement('h3'); title.textContent = rIdx===state.rounds.length-1? 'Final' : `Fase ${rIdx+1}`; roundEl.appendChild(title);
+        round.forEach((m, mIdx)=>{
+          const matchEl = document.createElement('div'); matchEl.className='match';
+          const playersDiv = document.createElement('div'); playersDiv.className='players';
+
+          // Player A
+          const pA = document.createElement('div'); pA.className='player';
+          const nameA = document.createElement('div'); nameA.className='name'; nameA.textContent = m.playerA ? m.playerA.name : (m.playerB? 'BYE' : '---');
+          const metaA = document.createElement('div'); metaA.textContent = m.playerA ? '' : '';
+          pA.appendChild(nameA); pA.appendChild(metaA);
+
+          // Player B
+          const pB = document.createElement('div'); pB.className='player';
+          const nameB = document.createElement('div'); nameB.className='name'; nameB.textContent = m.playerB ? m.playerB.name : (m.playerA? 'BYE' : '---');
+          const metaB = document.createElement('div'); metaB.textContent = m.playerB ? '' : '';
+          pB.appendChild(nameB); pB.appendChild(metaB);
+
+          playersDiv.appendChild(pA); playersDiv.appendChild(pB);
+
+          // match controls
+          const meta = document.createElement('div'); meta.className='meta';
+          const status = document.createElement('div'); status.className='status'; status.textContent = m.winner ? `Vencedor: ${m.winnerName||m.winner}` : (m.playerA && !m.playerB ? 'Avança por BYE' : (m.playerB && !m.playerA ? 'Avança por BYE' : 'Aguardando'));
+
+          const openBtn = document.createElement('button'); openBtn.textContent='Abrir partida'; openBtn.className='btn-ghost'; openBtn.onclick = ()=>{ openMatchEditor(rIdx, mIdx); };
+
+          meta.appendChild(status); meta.appendChild(openBtn);
+
+          matchEl.appendChild(playersDiv);
+          matchEl.appendChild(meta);
+          roundEl.appendChild(matchEl);
+        });
+        roundsEl.appendChild(roundEl);
+      });
+
+      bracketArea.appendChild(roundsEl);
+    }
+
+    // ======= Match editor (modal-like) ========
+    function openMatchEditor(roundIdx, matchIdx){
+      const match = state.rounds[roundIdx][matchIdx];
+      if(!match) return;
+
+      // create simple modal
+      const modal = document.createElement('div');
+      Object.assign(modal.style, {position:'fixed',inset:0,background:'rgba(2,6,23,0.6)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:9999});
+      const card = document.createElement('div'); card.className='card'; card.style.width='720px'; card.style.maxHeight='80vh'; card.style.overflow='auto';
+
+      const title = document.createElement('h2'); title.textContent = `Partida — Fase ${roundIdx+1} | ${match.playerA?match.playerA.name:'---'}  x  ${match.playerB?match.playerB.name:'---'}`;
+      title.style.fontSize='16px'; title.style.marginTop='0';
+
+      card.appendChild(title);
+
+      if(!match.playerA || !match.playerB){
+        const info = document.createElement('div'); info.className='muted'; info.textContent = 'Partida com BYE ou vaga vazia. Clique em "Conceder vitória" para avançar ou edite os jogadores na primeira fase.'; card.appendChild(info);
+      }
+
+      // shots editor
+      const shotsArea = document.createElement('div'); shotsArea.style.marginTop='12px';
+      const stageLabel = document.createElement('div'); stageLabel.className='muted'; stageLabel.textContent = `Stage: ${match.stage}`; shotsArea.appendChild(stageLabel);
+
+      const grid = document.createElement('div'); grid.style.display='grid'; grid.style.gridTemplateColumns='1fr 1fr'; grid.style.gap='12px'; grid.style.marginTop='8px';
+
+      const colA = document.createElement('div'); const colB = document.createElement('div');
+      colA.innerHTML = `<div style="font-weight:700;margin-bottom:6px">${match.playerA?escapeHtml(match.playerA.name):'---'}</div>`;
+      colB.innerHTML = `<div style="font-weight:700;margin-bottom:6px">${match.playerB?escapeHtml(match.playerB.name):'---'}</div>`;
+
+      function renderShots(){
+        colA.querySelectorAll('.shot').forEach(n=>n.remove()); colB.querySelectorAll('.shot').forEach(n=>n.remove());
+        const shotsCount = match.stage === 'main' ? 5 : (match.stage === 'tb3' ? 3 : 1);
+
+        const rowA = document.createElement('div'); rowA.className='shot-grid';
+        for(let i=0;i<shotsCount;i++){
+          const s = document.createElement('div'); s.className='shot'; s.textContent = i+1;
+          const val = match.shotsA[i]; if(val===true) s.classList.add('hit'); if(val===false) s.classList.add('miss');
+          s.onclick = ()=>{ match.shotsA[i] = match.shotsA[i]===true ? false : (match.shotsA[i]===false ? null : true); persist(); renderShots(); };
+          rowA.appendChild(s);
+        }
+        // sudden death indicator: if sudden, show single buttons and alternate
+        if(match.stage === 'sudden'){
+          const note = document.createElement('div'); note.className='small muted'; note.textContent='(Disputa alternada: marque hit/miss e depois clique Checar vencedor)'; rowA.appendChild(note);
+        }
+
+        const rowB = document.createElement('div'); rowB.className='shot-grid';
+        for(let i=0;i<shotsCount;i++){
+          const s = document.createElement('div'); s.className='shot'; s.textContent = i+1;
+          const val = match.shotsB[i]; if(val===true) s.classList.add('hit'); if(val===false) s.classList.add('miss');
+          s.onclick = ()=>{ match.shotsB[i] = match.shotsB[i]===true ? false : (match.shotsB[i]===false ? null : true); persist(); renderShots(); };
+          rowB.appendChild(s);
+        }
+
+        // score summary
+        const scoreA = match.shotsA.filter(v=>v===true).length;
+        const scoreB = match.shotsB.filter(v=>v===true).length;
+
+        const scoreDiv = document.createElement('div'); scoreDiv.style.marginTop='8px'; scoreDiv.innerHTML = `<strong>Placar: ${scoreA} x ${scoreB}</strong>`;
+
+        // action buttons
+        const actions = document.createElement('div'); actions.style.display='flex'; actions.style.gap='8px'; actions.style.marginTop='8px';
+        const checkBtn = document.createElement('button'); checkBtn.textContent='Checar vencedor'; checkBtn.onclick = ()=>{ tryResolveMatch(roundIdx, matchIdx); renderShots(); renderBracket(); };
+        const forceBtn = document.createElement('button'); forceBtn.textContent='Conceder vitória'; forceBtn.className='btn-ghost'; forceBtn.onclick = ()=>{ if(!confirm('Conceder vitória para A? (Cancel para conceder para B)')){ setWinner(match, 'B'); } else { setWinner(match,'A'); } persist(); renderBracket(); document.body.removeChild(modal); };
+        const resetShots = document.createElement('button'); resetShots.textContent='Limpar tiros'; resetShots.className='btn-ghost'; resetShots.onclick = ()=>{ match.shotsA=[]; match.shotsB=[]; match.stage='main'; match.winner=null; persist(); renderShots(); renderBracket(); };
+
+        actions.appendChild(checkBtn); actions.appendChild(forceBtn); actions.appendChild(resetShots);
+
+        // attach
+        colA.appendChild(rowA); colB.appendChild(rowB);
+        shotsArea.innerHTML=''; shotsArea.appendChild(stageLabel); shotsArea.appendChild(grid);
+        grid.appendChild(colA); grid.appendChild(colB);
+        shotsArea.appendChild(scoreDiv); shotsArea.appendChild(actions);
+      }
+
+      renderShots();
+
+      card.appendChild(shotsArea);
+      const close = document.createElement('div'); close.style.display='flex'; close.style.gap='8px'; close.style.marginTop='10px';
+      const closeBtn = document.createElement('button'); closeBtn.textContent='Fechar'; closeBtn.className='btn-ghost'; closeBtn.onclick=()=>{ persist(); document.body.removeChild(modal); renderBracket(); };
+      close.appendChild(closeBtn);
+      card.appendChild(close);
+
+      modal.appendChild(card); document.body.appendChild(modal);
+    }
+
+    // ======= Match resolution logic ========
+    function tryResolveMatch(roundIdx, matchIdx){
+      const match = state.rounds[roundIdx][matchIdx];
+      if(!match.playerA || !match.playerB) {
+        // BYE
+        if(match.playerA && !match.playerB) setWinner(match,'A');
+        else if(match.playerB && !match.playerA) setWinner(match,'B');
+        persist(); return;
+      }
+
+      const countA = match.shotsA.filter(v=>v===true).length;
+      const countB = match.shotsB.filter(v=>v===true).length;
+
+      if(match.stage === 'main'){
+        // if not all shots filled, still allow manual but prefer full
+        // if someone has higher score after 5, decide winner
+        if(match.shotsA.length >=5 && match.shotsB.length >=5){
+          if(countA>countB) setWinner(match,'A');
+          else if(countB>countA) setWinner(match,'B');
+          else { // tie -> go to tb3
+            match.stage='tb3'; match.shotsA=[]; match.shotsB=[]; alert('Empate! Vá para a rodada de desempate (3 tiros).');
+          }
+        } else {
+          alert('Preencha os 5 tiros de cada competidor ou use "Checar vencedor" conscientemente.');
+        }
+      } else if(match.stage === 'tb3'){
+        if(match.shotsA.length >=3 && match.shotsB.length >=3){
+          const cA = match.shotsA.filter(v=>v===true).length; const cB = match.shotsB.filter(v=>v===true).length;
+          if(cA>cB) setWinner(match,'A');
+          else if(cB>cA) setWinner(match,'B');
+          else { match.stage='sudden'; match.shotsA=[]; match.shotsB=[]; match.turn=0; alert('Persistiu o empate! Partida irá para alternadas (morte súbita).'); }
+        } else {
+          alert('Preencha os 3 tiros de cada competidor para desempate.');
+        }
+      } else if(match.stage === 'sudden'){
+        // sudden death: each side marks a single shot per round; compare last pair
+        // we'll consider the last values in shotsA and shotsB arrays
+        const lastA = match.shotsA[match.shotsA.length-1];
+        const lastB = match.shotsB[match.shotsB.length-1];
+        if(lastA===undefined || lastB===undefined){ alert('Em alternadas, marque um tiro para cada competidor por rodada (1 tiro por competidor) antes de checar.'); return; }
+        if(lastA === true && lastB !== true) setWinner(match,'A');
+        else if(lastB === true && lastA !== true) setWinner(match,'B');
+        else {
+          // tied on this sudden pair, continue alternating
+          alert('Empate na rodada de alternadas — continue (marque o próximo tiro).');
+        }
+      }
+      persist(); renderBracket();
+    }
+
+    function setWinner(match, who){
+      match.winner = who === 'A' ? (match.playerA?match.playerA.id:null) : (match.playerB?match.playerB.id:null);
+      match.winnerName = who === 'A' ? (match.playerA?match.playerA.name:'') : (match.playerB?match.playerB.name:'');
+      // propagate to next round if exists
+      propagateWinner(match);
+      persist();
+    }
+
+    function propagateWinner(match){
+      // find where this match is located
+      for(let r=0;r<state.rounds.length;r++){
+        const idx = state.rounds[r].findIndex(m=>m.id===match.id);
+        if(idx!==-1){
+          // if last round, nothing to propagate
+          if(r === state.rounds.length-1) return;
+          // find next match index
+          const nextIdx = Math.floor(idx/2);
+          const slot = idx%2===0 ? 'playerA' : 'playerB';
+          const winnerObj = match.winner ? (match.winnerName? {id:match.winner, name:match.winnerName} : null) : null;
+          state.rounds[r+1][nextIdx][slot] = winnerObj;
+          // if the receiving match has both players null or one null, handle BYE automatically only in first level
+          return;
+        }
+      }
+    }
+
+    // ======= Persistence ========
+    function persist(){ saveState(state); }
+
+    // ======= Export / Import ========
+    exportBtn.onclick = ()=>{
+      const blob = new Blob([JSON.stringify(state, null, 2)], {type:'application/json'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href=url; a.download = (state.name||'tournament') + '.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    }
+    importBtn.onclick = ()=>{ importInput.click(); }
+    importInput.onchange = (e)=>{
+      const f = e.target.files[0]; if(!f) return;
+      const reader = new FileReader(); reader.onload = ()=>{
+        try{ const data = JSON.parse(reader.result); state = data; persist(); renderPlayers(); renderBracket(); alert('Importado com sucesso'); }catch(err){ alert('Arquivo inválido') }
+      }; reader.readAsText(f);
+    }
+
+    // ======= helper escape ========
+    function escapeHtml(s){ return s.replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+
+    // ======= On load ========
+    (function init(){ renderPlayers(); renderBracket(); tournamentName.value = state.name || ''; })();
+
+    // ======= Public controls ========
+    generateBtn.onclick = generateBracket;
+  </script>
+</body>
+</html>
