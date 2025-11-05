@@ -1,0 +1,14 @@
+{
+  "fase_grupos": [
+    { "rodada": 1, "jogo": "Jogo 1", "times": ["Time A", "Time B"] },
+    { "rodada": 1, "jogo": "Jogo 2", "times": ["Time C", "Time D"] },
+    { "rodada": 2, "jogo": "Jogo 3", "times": ["Time A", "Time C"] },
+    { "rodada": 2, "jogo": "Jogo 4", "times": ["Time B", "Time D"] },
+    { "rodada": 3, "jogo": "Jogo 5", "times": ["Time A", "Time D"] },
+    { "rodada": 3, "jogo": "Jogo 6", "times": ["Time B", "Time C"] }
+  ],
+  "fase_eliminatoria": [
+    { "jogo": "Jogo 7", "times": ["2º colocado", "3º colocado"], "observacao": "Semifinal" },
+    { "jogo": "Jogo 8", "times": ["1º colocado", "Vencedor da semi"], "observacao": "Final" }
+  ]
+}
